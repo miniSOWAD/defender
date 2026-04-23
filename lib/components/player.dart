@@ -1,55 +1,48 @@
 import 'package:flame/components.dart';
-import 'package:flame/collisions.dart';
-import '../main.dart';
+import '../game_engine.dart';
+import 'zombie.dart';
 import 'bullet.dart';
+import '../constants.dart';
 
-class PlayerComponent extends SpriteComponent with HasGameRef<ZombieSurvivalGame> {
-  final double speed = 200.0;
-  int facingDirection = 1; // 1 for right, -1 for left
-
-  PlayerComponent() : super(size: Vector2(64, 64), anchor: Anchor.center);
+class PlayerComponent extends SpriteComponent with HasGameRef<DefenderGame> {
+  int gridX = 1, gridY = 3;
+  
+  PlayerComponent() : super(size: Vector2(64, 64), anchor: Anchor.center, priority: 3);
 
   @override
-  Future<void> onLoad() async {
-    sprite = await gameRef.loadSprite('player.png');
-    position = gameRef.size / 2;
-    add(RectangleHitbox());
+  Future<void> onLoad() async { 
+    sprite = await gameRef.loadSprite('player.png'); 
   }
 
   @override
   void update(double dt) {
-    super.update(dt);
+    if (gridX == 0 && gameRef.houseHP < 100) gridX = 1; 
     
-    final joystick = gameRef.joystick;
-    if (!joystick.delta.isZero()) {
-      position.add(joystick.relativeDelta * speed * dt);
-      
-      // Flip sprite based on movement direction
-      if (joystick.relativeDelta.x < 0 && facingDirection == 1) {
-        flipHorizontallyAroundCenter();
-        facingDirection = -1;
-      } else if (joystick.relativeDelta.x > 0 && facingDirection == -1) {
-        flipHorizontallyAroundCenter();
-        facingDirection = 1;
+    Vector2 targetPos = Vector2((gridX + 0.5) * gameRef.blockWidth, (gridY + 0.5) * gameRef.blockHeight);
+    position.lerp(targetPos, 0.2);
+  }
+
+  void fire() {
+    if (gameRef.bullets <= 0) return;
+    gameRef.bullets--;
+    
+    ZombieComponent? closest;
+    double minDistance = double.infinity;
+    for (final zombie in gameRef.children.whereType<ZombieComponent>()) {
+      double dist = zombie.position.distanceTo(position);
+      if (dist < minDistance) { 
+        minDistance = dist; 
+        closest = zombie; 
       }
     }
     
-    // Clamp to screen bounds
-    position.clamp(Vector2(32, 32), gameRef.size - Vector2(32, 32));
-  }
-
-  void shoot() {
-    if (gameRef.bullets > 0) {
-      gameRef.bullets--;
-      
-      // Check if player is inside the repaired house (x < 200 bounds)
-      bool insideHouse = (gameRef.houseHP >= 100 && position.x < 200);
-      
-      gameRef.add(BulletComponent(
-        position: position.clone(), 
-        direction: facingDirection,
-        isBuffed: insideHouse,
-      ));
+    Vector2 direction = closest != null ? (closest.position - position).normalized() : Vector2(1, 0);
+    
+    double dmg = 1.0;
+    if (gridX == 0 && closest != null) {
+      dmg = GameConfig.zombieStats[closest.type]!['buffDmg'] as double;
     }
+    
+    gameRef.add(BulletComponent(pos: position.clone(), direction: direction, damage: dmg));
   }
 }

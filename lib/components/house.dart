@@ -1,22 +1,18 @@
 import 'package:flame/components.dart';
-import '../main.dart';
+import '../game_engine.dart';
 
-class HouseComponent extends SpriteComponent with HasGameRef<ZombieSurvivalGame> {
-  HouseComponent() : super(size: Vector2(200, 300), position: Vector2(0, 100));
+class HouseComponent extends SpriteComponent with HasGameRef<DefenderGame> {
+  HouseComponent() : super(priority: 0);
 
   @override
   Future<void> onLoad() async {
-    sprite = await gameRef.loadSprite('broken.png');
+    sprite = gameRef.brokenSprite;
+    size = Vector2(gameRef.blockWidth, gameRef.size.y);
+    position = Vector2.zero();
   }
 
   @override
   void update(double dt) {
-    super.update(dt);
-    // Dynamically change sprite when fully repaired
-    if (gameRef.houseHP >= 100 && sprite != gameRef.houseSprite) {
-      sprite = gameRef.houseSprite;
-    } else if (gameRef.houseHP < 100 && sprite != gameRef.brokenSprite) {
-      sprite = gameRef.brokenSprite;
-    }
+    sprite = gameRef.houseHP >= 100 ? gameRef.houseSprite : gameRef.brokenSprite;
   }
 }

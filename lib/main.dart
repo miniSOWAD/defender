@@ -1,149 +1,165 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flame/game.dart';
-import 'package:flame/components.dart';
-import 'package:flame/palette.dart';
-import 'package:flame/input.dart';
-
 import 'constants.dart';
-import 'components/player.dart';
-import 'components/house.dart';
+import 'game_engine.dart';
 import 'components/zombie.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Force Landscape Mode
-  await SystemChrome.setPreferredOrientations([
-    DeviceOrientation.landscapeLeft,
-    DeviceOrientation.landscapeRight,
-  ]);
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.landscapeLeft, DeviceOrientation.landscapeRight]);
   await SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
   
-  runApp(GameWidget(game: ZombieSurvivalGame()));
+  final game = DefenderGame();
+  runApp(
+    MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        body: Stack(
+          children: [
+            GameWidget(game: game),
+            SafeArea(child: GameOverlay(game: game)),
+          ],
+        ),
+      ),
+    ),
+  );
 }
 
-class ZombieSurvivalGame extends FlameGame with HasCollisionDetection {
-  // Game State
-  int coins = 0;
-  int bullets = 24;
-  int houseHP = 0;
-  int currentDay = 1;
-  bool isNight = false;
-  
-  // Timers
-  double timer = 0;
-  double zombieSpawnTimer = 0;
-  final double cycleLength = 60; // 60 seconds per Day/Night phase
-
-  // Sprites loaded once for efficiency
-  late Sprite brokenSprite;
-  late Sprite houseSprite;
-
-  late PlayerComponent player;
-  late JoystickComponent joystick;
-  late TextComponent statsText;
+class GameOverlay extends StatelessWidget {
+  final DefenderGame game;
+  const GameOverlay({Key? key, required this.game}) : super(key: key);
 
   @override
-  Future<void> onLoad() async {
-    brokenSprite = await loadSprite('broken.png');
-    houseSprite = await loadSprite('house.png');
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder(
+      valueListenable: game.updateUI,
+      builder: (context, _, __) {
+        if (game.playerHP <= 0) {
+          return const Center(
+            child: Text("GAME OVER", style: TextStyle(fontSize: 60, color: Colors.red, fontWeight: FontWeight.bold))
+          );
+        }
 
-    // Background
-    add(SpriteComponent()
-      ..sprite = await loadSprite('garden.png')
-      ..size = size);
+        return Stack(
+          children: [
+            Align(
+              alignment: Alignment.topCenter,
+              child: _glassBox("Health: ${game.playerHP}/20 | House: ${game.houseHP}/100 | Kills: ${game.kills}", width: 400),
+            ),
+            
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 10.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    _glassBox("🪙 ${game.coins} Coins", isButton: false),
+                    _glassBox("🔫 ${game.bullets} Ammo\n(Buy 12 for 10)", onTap: () {
+                      if (game.coins >= GameConfig.bulletPackPrice) { 
+                        game.coins -= GameConfig.bulletPackPrice; 
+                        game.bullets += GameConfig.bulletPackAmount; 
+                      }
+                    }),
+                    _glassBox("🧱 ${game.bricks} Bricks\n(Buy 1 for 2)", onTap: () {
+                      if (game.coins >= GameConfig.brickPrice) { 
+                        game.coins -= GameConfig.brickPrice; 
+                        game.bricks++; 
+                      }
+                    }),
+                    _glassBox("🚧 ${game.barriers} Barriers\n(Buy 1 for 3)", onTap: () {
+                      if (game.coins >= GameConfig.barrierPrice) { 
+                        game.coins -= GameConfig.barrierPrice; 
+                        game.barriers++; 
+                      }
+                    }),
+                  ],
+                ),
+              ),
+            ),
 
-    // House
-    add(HouseComponent());
-
-    // Joystick (Bottom Left)
-    joystick = JoystickComponent(
-      knob: CircleComponent(radius: 20, paint: BasicPalette.white.withAlpha(150).paint()),
-      background: CircleComponent(radius: 50, paint: BasicPalette.black.withAlpha(100).paint()),
-      margin: const EdgeInsets.only(left: 40, bottom: 40),
+            Align(
+              alignment: Alignment.centerRight,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 20.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _dPadButton(Icons.arrow_upward, () { if(game.player.gridY > 0) game.player.gridY--; }),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _dPadButton(Icons.arrow_back, () { if(game.player.gridX > (game.houseHP >= 100 ? 0 : 1)) game.player.gridX--; }),
+                        const SizedBox(width: 50),
+                        _dPadButton(Icons.arrow_forward, () { if(game.player.gridX < GameConfig.cols - 1) game.player.gridX++; }),
+                      ],
+                    ),
+                    _dPadButton(Icons.arrow_downward, () { if(game.player.gridY < GameConfig.rows - 1) game.player.gridY++; }),
+                    const SizedBox(height: 20),
+                    GestureDetector(
+                      onTap: () => game.player.fire(),
+                      child: Container(
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(color: Colors.red.withOpacity(0.8), shape: BoxShape.circle, border: Border.all(color: Colors.white, width: 2)),
+                        child: const Text("FIRE", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            
+            // Testing Spawn Buttons
+            Align(
+              alignment: Alignment.centerLeft, 
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(icon: const Icon(Icons.bug_report, color: Colors.green), onPressed: () => game.add(ZombieComponent('normie'))),
+                  IconButton(icon: const Icon(Icons.bug_report, color: Colors.yellow), onPressed: () => game.add(ZombieComponent('upper_normie'))),
+                  IconButton(icon: const Icon(Icons.bug_report, color: Colors.orange), onPressed: () => game.add(ZombieComponent('greater_normie'))),
+                  IconButton(icon: const Icon(Icons.bug_report, color: Colors.red), onPressed: () => game.add(ZombieComponent('mommy'))),
+                  IconButton(icon: const Icon(Icons.bug_report, color: Colors.purple), onPressed: () => game.add(ZombieComponent('super_mommy'))),
+                ],
+              )
+            )
+          ],
+        );
+      },
     );
-    add(joystick);
-
-    // Player
-    player = PlayerComponent();
-    add(player);
-
-    _setupHUD();
   }
 
-  void _setupHUD() async {
-    statsText = TextComponent(
-      text: '',
-      position: Vector2(20, 20),
-      textRenderer: TextPaint(style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+  Widget _glassBox(String text, {double? width, VoidCallback? onTap, bool isButton = true}) {
+    Widget box = ClipRRect(
+      borderRadius: BorderRadius.circular(15),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+        child: Container(
+          width: width,
+          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.black.withOpacity(0.4),
+            borderRadius: BorderRadius.circular(15),
+            border: Border.all(color: Colors.white.withOpacity(0.5)),
+          ),
+          child: Text(text, textAlign: TextAlign.center, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+        ),
+      ),
     );
-    add(statsText);
-
-    // Shoot Button (Bottom Right)
-    add(HudButtonComponent(
-      button: SpriteComponent(sprite: await loadSprite('gun.png'), size: Vector2(60, 60)),
-      margin: const EdgeInsets.only(right: 40, bottom: 40),
-      onPressed: () => player.shoot(),
-    ));
-
-    // Buy Bricks Button (Middle Right)
-    add(HudButtonComponent(
-      button: TextComponent(text: "BUILD\n(2 Coins)", textRenderer: TextPaint(style: const TextStyle(backgroundColor: Colors.blue))),
-      margin: const EdgeInsets.only(right: 40, bottom: 120),
-      onPressed: () => buyBricks(),
-    ));
-
-    // Buy Bullets Button (Top Right)
-    add(HudButtonComponent(
-      button: TextComponent(text: "AMMO\n(10 Coins)", textRenderer: TextPaint(style: const TextStyle(backgroundColor: Colors.green))),
-      margin: const EdgeInsets.only(right: 40, bottom: 200),
-      onPressed: () => buyBullets(),
-    ));
+    return isButton ? GestureDetector(onTap: onTap, child: Padding(padding: const EdgeInsets.all(8), child: box)) : Padding(padding: const EdgeInsets.all(8), child: box);
   }
 
-  @override
-  void update(double dt) {
-    super.update(dt);
-    timer += dt;
-    zombieSpawnTimer += dt;
-    
-    // Day/Night Phase Switcher
-    if (timer >= cycleLength) {
-      isNight = !isNight;
-      timer = 0;
-      if (!isNight) currentDay++; // Increment day when morning starts
-    }
-
-    _handleZombieSpawning();
-
-    // Update HUD
-    String phase = isNight ? "NIGHT" : "DAY";
-    statsText.text = '$phase $currentDay | Coins: $coins | Ammo: $bullets | House HP: $houseHP/100';
-  }
-
-  void _handleZombieSpawning() {
-    // Day 1 Logic: Only Normies. 2s Day, 1s Night.
-    if (currentDay == 1) {
-      double spawnRate = isNight ? 1.0 : 2.0;
-      if (zombieSpawnTimer >= spawnRate) {
-        add(ZombieComponent('normie'));
-        zombieSpawnTimer = 0;
-      }
-    }
-    // Logic for Day 2 to 5 will be added here later...
-  }
-
-  void buyBricks() {
-    if (coins >= GameConfig.brickPrice && houseHP < 100) {
-      coins -= GameConfig.brickPrice;
-      houseHP = (houseHP + GameConfig.brickHP).clamp(0, 100);
-    }
-  }
-
-  void buyBullets() {
-    if (coins >= GameConfig.bulletPackPrice) {
-      coins -= GameConfig.bulletPackPrice;
-      bullets += GameConfig.bulletPackAmount;
-    }
+  Widget _dPadButton(IconData icon, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.all(5),
+        padding: const EdgeInsets.all(10),
+        decoration: BoxDecoration(color: Colors.blue.withOpacity(0.5), shape: BoxShape.circle),
+        child: Icon(icon, color: Colors.white, size: 30),
+      ),
+    );
   }
 }

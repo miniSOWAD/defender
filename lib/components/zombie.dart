@@ -1,46 +1,67 @@
+import 'dart:math';
 import 'package:flame/components.dart';
-import 'package:flame/collisions.dart';
-import '../main.dart';
 import '../constants.dart';
+import '../game_engine.dart';
+import 'barrier.dart';
 
-class ZombieComponent extends SpriteComponent with HasGameRef<ZombieSurvivalGame> {
+class ZombieComponent extends SpriteComponent with HasGameRef<DefenderGame> {
   final String type;
-  late double health;
+  late double hp, attackDmg;
   late int reward;
-  final double speed = 40.0;
+  double attackTimer = 0.0;
+  final double speed = 30.0;
 
-  ZombieComponent(this.type) : super(size: Vector2(80, 80));
+  ZombieComponent(this.type) : super(size: Vector2(80, 80), anchor: Anchor.center, priority: 2);
 
   @override
   Future<void> onLoad() async {
     final stats = GameConfig.zombieStats[type]!;
     sprite = await gameRef.loadSprite(stats['sprite'] as String);
-    health = stats['hp'] as double;
+    hp = stats['hp'] as double;
     reward = stats['coins'] as int;
+    attackDmg = stats['dmg'] as double;
     
-    add(RectangleHitbox());
-    
-    // Spawn randomly on the right side of the screen
-    double randomY = 100.0 + (gameRef.size.y - 200.0) * (gameRef.timer % 1); // Simple pseudo-random Y
-    position = Vector2(gameRef.size.x + 50, randomY);
+    int startY = Random().nextInt(GameConfig.rows);
+    position = Vector2(gameRef.size.x + 40, (startY + 0.5) * gameRef.blockHeight);
   }
 
   @override
   void update(double dt) {
-    super.update(dt);
-    position.x -= speed * dt; // Move left towards the house
+    int currentGridX = (position.x / gameRef.blockWidth).floor();
+    int currentGridY = (position.y / gameRef.blockHeight).floor();
+    
+    BarrierComponent? barrier;
+    for (final b in gameRef.children.whereType<BarrierComponent>()) {
+      if (b.gridX == currentGridX && b.gridY == currentGridY) barrier = b;
+    }
 
-    // Game Over condition if zombie reaches the house edge (x = 0)
-    if (position.x < 0) {
-      removeFromParent();
-      // You can add Game Over logic here later
+    if (barrier != null) {
+      _attack(dt, () => barrier!.takeDamage(attackDmg));
+    } else if (currentGridX <= gameRef.player.gridX) {
+      if (position.distanceTo(gameRef.player.position) < 50) {
+        _attack(dt, () => gameRef.takePlayerDamage(attackDmg));
+      } else {
+        Vector2 direction = (gameRef.player.position - position).normalized();
+        position += direction * speed * dt;
+      }
+    } else {
+      position.x -= speed * dt;
+    }
+  }
+
+  void _attack(double dt, void Function() onAttack) {
+    attackTimer += dt;
+    if (attackTimer >= 2.0) {
+      onAttack();
+      attackTimer = 0.0;
     }
   }
 
   void takeDamage(double amount) {
-    health -= amount;
-    if (health <= 0.01) { // 0.01 handles floating point precision issues
+    hp -= amount;
+    if (hp <= 0) {
       gameRef.coins += reward;
+      gameRef.kills++;
       removeFromParent();
     }
   }
