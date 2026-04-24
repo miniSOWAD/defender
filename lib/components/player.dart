@@ -1,3 +1,4 @@
+import 'dart:ui'; // Required for the Canvas rendering
 import 'package:flame/components.dart';
 import '../game_engine.dart';
 import 'zombie.dart';
@@ -16,19 +17,28 @@ class PlayerComponent extends SpriteComponent with HasGameRef<DefenderGame> {
 
   @override
   void update(double dt) {
-    // If inside the house (-1) and the house breaks, evict out to the lawn (0)
+    // Evict out to the lawn (0) ONLY if the house is destroyed
     if (gridX == -1 && !gameRef.isHouseBuilt) gridX = 0; 
     
     Vector2 targetPos;
     if (gridX == -1) {
-      // Draw player inside the left bezel
+      // Player is mathematically inside the left bezel
       targetPos = Vector2(gameRef.leftBezel * 0.5, gameRef.topBezel + (gridY + 0.5) * gameRef.blockHeight);
     } else {
-      // Draw player anywhere on the 15-column lawn
+      // Player is anywhere on the 15-column lawn
       targetPos = Vector2(gameRef.leftBezel + (gridX + 0.5) * gameRef.blockWidth, gameRef.topBezel + (gridY + 0.5) * gameRef.blockHeight);
     }
     
     position.lerp(targetPos, 0.2);
+  }
+
+  // --- NEW: HIDE PLAYER WHEN INSIDE THE HOUSE ---
+  @override
+  void render(Canvas canvas) {
+    // Only draw the player's sprite if they are NOT in column -1
+    if (gridX != -1) {
+      super.render(canvas);
+    }
   }
 
   void fire() {
