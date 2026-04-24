@@ -16,9 +16,18 @@ class PlayerComponent extends SpriteComponent with HasGameRef<DefenderGame> {
 
   @override
   void update(double dt) {
-    if (gridX == 0 && gameRef.houseHP < 100) gridX = 1; 
+    // If inside the house (-1) and the house breaks, evict out to the lawn (0)
+    if (gridX == -1 && !gameRef.isHouseBuilt) gridX = 0; 
     
-    Vector2 targetPos = Vector2((gridX + 0.5) * gameRef.blockWidth, (gridY + 0.5) * gameRef.blockHeight);
+    Vector2 targetPos;
+    if (gridX == -1) {
+      // Draw player inside the left bezel
+      targetPos = Vector2(gameRef.leftBezel * 0.5, gameRef.topBezel + (gridY + 0.5) * gameRef.blockHeight);
+    } else {
+      // Draw player anywhere on the 15-column lawn
+      targetPos = Vector2(gameRef.leftBezel + (gridX + 0.5) * gameRef.blockWidth, gameRef.topBezel + (gridY + 0.5) * gameRef.blockHeight);
+    }
+    
     position.lerp(targetPos, 0.2);
   }
 
@@ -39,7 +48,8 @@ class PlayerComponent extends SpriteComponent with HasGameRef<DefenderGame> {
     Vector2 direction = closest != null ? (closest.position - position).normalized() : Vector2(1, 0);
     
     double dmg = 1.0;
-    if (gridX == 0 && closest != null) {
+    // Firing from the bezel (-1) gives the buff
+    if (gridX == -1 && closest != null) {
       dmg = GameConfig.zombieStats[closest.type]!['buffDmg'] as double;
     }
     

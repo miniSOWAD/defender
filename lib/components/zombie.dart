@@ -22,13 +22,13 @@ class ZombieComponent extends SpriteComponent with HasGameRef<DefenderGame> {
     attackDmg = stats['dmg'] as double;
     
     int startY = Random().nextInt(GameConfig.rows);
-    position = Vector2(gameRef.size.x + 40, (startY + 0.5) * gameRef.blockHeight);
+    position = Vector2(gameRef.size.x + 40, gameRef.topBezel + (startY + 0.5) * gameRef.blockHeight);
   }
 
   @override
   void update(double dt) {
-    int currentGridX = (position.x / gameRef.blockWidth).floor();
-    int currentGridY = (position.y / gameRef.blockHeight).floor();
+    int currentGridX = ((position.x - gameRef.leftBezel) / gameRef.blockWidth).floor();
+    int currentGridY = ((position.y - gameRef.topBezel) / gameRef.blockHeight).floor();
     
     BarrierComponent? barrier;
     for (final b in gameRef.children.whereType<BarrierComponent>()) {
@@ -37,7 +37,20 @@ class ZombieComponent extends SpriteComponent with HasGameRef<DefenderGame> {
 
     if (barrier != null) {
       _attack(dt, () => barrier!.takeDamage(attackDmg));
-    } else if (currentGridX <= gameRef.player.gridX) {
+    } 
+    // They crossed column 0 and hit the left bezel! Attack the house!
+    else if (currentGridX < 0) {
+      _attack(dt, () {
+        gameRef.houseHP -= attackDmg;
+        // The house is destroyed!
+        if (gameRef.houseHP <= 0) {
+          gameRef.houseHP = 0;
+          gameRef.isHouseBuilt = false; 
+        }
+      });
+    }
+    // Player is on the lawn, and zombie passed/reached them. Hunt them!
+    else if (currentGridX <= gameRef.player.gridX && gameRef.player.gridX >= 0) {
       if (position.distanceTo(gameRef.player.position) < 50) {
         _attack(dt, () => gameRef.takePlayerDamage(attackDmg));
       } else {

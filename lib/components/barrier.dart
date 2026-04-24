@@ -11,7 +11,10 @@ class BarrierComponent extends SpriteComponent with HasGameRef<DefenderGame> {
   Future<void> onLoad() async {
     sprite = await gameRef.loadSprite('barrier.png');
     size = Vector2(gameRef.blockWidth, gameRef.blockHeight);
-    position = Vector2(gridX * gameRef.blockWidth, gridY * gameRef.blockHeight);
+    position = Vector2(
+    gameRef.leftBezel + gridX * gameRef.blockWidth, 
+    gameRef.topBezel + gridY * gameRef.blockHeight
+  );
   }
 
   void takeDamage(double amount) {
