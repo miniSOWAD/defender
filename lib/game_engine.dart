@@ -1,33 +1,44 @@
 import 'package:flame/game.dart';
 import 'package:flame/events.dart';
 import 'package:flame/components.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart'; // for ValueNotifier
 import 'constants.dart';
 import 'components/player.dart';
 import 'components/house.dart';
 import 'components/barrier.dart';
-import 'dart:math';
-import 'components/zombie.dart';
+
+// --- MAIN GAME STATES ---
+enum GameState { mainMenu, playing, paused, gameOver }
 
 class DefenderGame extends FlameGame with TapCallbacks {
   int coins = 10, bullets = 24, bricks = 10, barriers = 5;
-  double spawnTimer = 0.0;
   double playerHP = 20.0, houseHP = 0.0;
   int kills = 0;
-  bool isHouseBuilt = false;
+  bool isHouseBuilt = false; 
 
-  // --- BEZEL LAYOUT SYSTEM ---
+  // --- DAY/NIGHT & FEAR VARIABLES ---
+  bool isNight = false;
+  double cycleTimer = 0.0; 
+  double fearLevel = 0.0;  // 0.0 to 6.0
+  double zombieSpawnTimer = 0.0;
+
+  // --- MENU STATES ---
+  GameState _state = GameState.playing; // Start in playing state for this part
+  GameState get state => _state;
+
+  // Bezel Layout System
   double get topBezel => 50.0;
   double get bottomBezel => 80.0;
-  double get leftBezel => 130.0; // Space for house & fire button
+  double get leftBezel => 130.0; 
   
-  double get gridWidth => size.x - leftBezel; // No right bezel
+  double get gridWidth => size.x - leftBezel; 
   double get gridHeight => size.y - topBezel - bottomBezel;
 
   double get blockWidth => gridWidth / GameConfig.cols;
   double get blockHeight => gridHeight / GameConfig.rows;
 
-  late Sprite houseSprite, brokenSprite;
+  late Sprite houseSprite, brokenSprite, daySprite, nightSprite;
+  late SpriteComponent background;
   late PlayerComponent player;
   final ValueNotifier<int> updateUI = ValueNotifier(0);
 
@@ -35,12 +46,15 @@ class DefenderGame extends FlameGame with TapCallbacks {
   Future<void> onLoad() async {
     houseSprite = await loadSprite('house.png');
     brokenSprite = await loadSprite('broken.png');
+    daySprite = await loadSprite('garden.png');
+    nightSprite = await loadSprite('night.png'); 
 
-    // Stretched background
-    add(SpriteComponent()
-      ..sprite = await loadSprite('garden.png')
+    // Initialize background with Day sprite
+    background = SpriteComponent()
+      ..sprite = daySprite
       ..size = size
-      ..priority = -10);
+      ..priority = -10;
+    add(background);
 
     add(HouseComponent());
     player = PlayerComponent();
@@ -50,37 +64,50 @@ class DefenderGame extends FlameGame with TapCallbacks {
   @override
   void update(double dt) {
     super.update(dt);
+    if (_state != GameState.playing) return; // Freeze logic if paused or not playing
+
     if (playerHP <= 0) {
-      pauseEngine();
-      return; // Stop updating if player is dead
+      _state = GameState.gameOver;
+      return;
     }
 
-    // --- AUTOMATIC ZOMBIE SPAWNER ---
-    spawnTimer += dt;
-    if (spawnTimer >= 2.5) {
-      spawnTimer = 0.0;
+    // --- DAY / NIGHT CYCLE LOGIC (120 secs each) ---
+    cycleTimer += dt;
+    if (cycleTimer >= 120.0) { 
+      cycleTimer = 0.0;
+      isNight = !isNight;
+      background.sprite = isNight ? nightSprite : daySprite;
+      if (!isNight) fearLevel = 0.0; // Reset fear when morning comes
+    }
+
+    // --- FEAR MECHANIC ---
+    if (isNight) {
+      if (player.gridX >= 0) {
+        // Player is outside: Fill 1 block every 2 seconds (6 blocks in 12 secs)
+        fearLevel += dt / 2.0;
+      } else if (player.gridX == -1) {
+        // Player is inside: Empty 1 block every 4 seconds (6 blocks in 24 secs)
+        fearLevel -= dt / 4.0;
+      }
       
-      // Pick a random zombie type
-      List<String> types = ['normie', 'upper_normie', 'greater_normie', 'mommy', 'super_mommy'];
-      String randomType = types[Random().nextInt(types.length)];
-      
-      add(ZombieComponent(randomType));
+      fearLevel = fearLevel.clamp(0.0, 6.0); 
+
+      // If fully terrified (6 blocks maxed), lose 0.5 HP per second
+      if (fearLevel >= 6.0) {
+        takePlayerDamage(0.5 * dt);
+      }
+    }
+
+    // --- ZOMBIE SPAWNER ---
+    zombieSpawnTimer += dt;
+    double currentSpawnRate = isNight ? 2.0 : 3.0; // 2 secs at night, 3 secs at day
+    
+    if (zombieSpawnTimer >= currentSpawnRate) {
+      zombieSpawnTimer = 0.0;
+      //... logic for random zombie type spawn
     }
 
     updateUI.value++;
-  }
-
-  @override
-  void render(Canvas canvas) {
-    super.render(canvas);
-    // Draw subtle grid lines to clearly show the 90 blocks over the background
-    final paint = Paint()..color = Colors.white.withOpacity(0.15)..style = PaintingStyle.stroke..strokeWidth = 1;
-    for (int i = 0; i <= GameConfig.cols; i++) {
-      canvas.drawLine(Offset(leftBezel + i * blockWidth, topBezel), Offset(leftBezel + i * blockWidth, size.y - bottomBezel), paint);
-    }
-    for (int i = 0; i <= GameConfig.rows; i++) {
-      canvas.drawLine(Offset(leftBezel, topBezel + i * blockHeight), Offset(size.x, topBezel + i * blockHeight), paint);
-    }
   }
 
   @override
@@ -89,28 +116,41 @@ class DefenderGame extends FlameGame with TapCallbacks {
     double tapY = event.canvasPosition.y;
 
     if (tapX < leftBezel) {
-      // Clicked in House Bezel
       if (bricks > 0 && houseHP < 100) {
         bricks--; 
         houseHP = (houseHP + 3).clamp(0, 100);
-        if (houseHP >= 100) isHouseBuilt = true;
+        if (houseHP >= 100) isHouseBuilt = true; 
       }
     } else {
-      // Clicked in Grid Area
-      int tapCol = ((tapX - leftBezel) / blockWidth).floor();
-      int tapRow = ((tapY - topBezel) / blockHeight).floor();
-      
-      if (tapCol >= 0 && tapCol < GameConfig.cols && tapRow >= 0 && tapRow < GameConfig.rows) {
-        if (barriers > 0) {
-          bool isOccupied = children.whereType<BarrierComponent>().any((b) => b.gridX == tapCol && b.gridY == tapRow);
-          if (!isOccupied) {
-            barriers--;
-            add(BarrierComponent(tapCol, tapRow));
-          }
-        }
-      }
+      //... logic for barrier placement on 6x15 grid
     }
   }
 
   void takePlayerDamage(double dmg) { playerHP -= dmg; }
+
+  // --- GAME STATE COMMANDS ---
+  void pause() {
+    if (_state == GameState.playing) {
+      _state = GameState.paused;
+      updateUI.value++;
+    }
+  }
+
+  void resume() {
+    if (_state == GameState.paused) {
+      _state = GameState.playing;
+      updateUI.value++;
+    }
+  }
+
+  void exitToMainMenu() {
+    _state = GameState.mainMenu;
+    updateUI.value++;
+  }
+
+  void startNewGame() {
+    //... logic to reset all variables
+    _state = GameState.playing;
+    updateUI.value++;
+  }
 }

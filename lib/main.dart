@@ -1,5 +1,5 @@
 import 'dart:ui';
-import 'dart:math'; // Added for joystick circular math
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flame/game.dart';
@@ -22,16 +22,12 @@ class GameScreen extends StatefulWidget {
 class _GameScreenState extends State<GameScreen> {
   final DefenderGame game = DefenderGame();
   DateTime lastMove = DateTime.now();
-  
-  // This notifier drives the visual movement of the joystick thumb
   final ValueNotifier<Offset> joystickOffset = ValueNotifier(Offset.zero);
 
-  // --- JOYSTICK HANDLERS ---
   void _handleJoystickUpdate(DragUpdateDetails details) {
-    double dx = details.localPosition.dx - 75; // 75 is the center of the 150x150 container
+    double dx = details.localPosition.dx - 75; 
     double dy = details.localPosition.dy - 75;
     
-    // VISUALS: Clamp the dot movement to a maximum radius of 50 pixels
     double distance = sqrt(dx * dx + dy * dy);
     if (distance > 50) {
       joystickOffset.value = Offset((dx / distance) * 50, (dy / distance) * 50);
@@ -39,7 +35,6 @@ class _GameScreenState extends State<GameScreen> {
       joystickOffset.value = Offset(dx, dy);
     }
 
-    // LOGIC: Player Movement (with 200ms cooldown & 20px deadzone)
     if (DateTime.now().difference(lastMove).inMilliseconds < 200) return;
     if (distance < 20) return; 
 
@@ -47,21 +42,31 @@ class _GameScreenState extends State<GameScreen> {
       if (dx > 0 && game.player.gridX < GameConfig.cols - 1) {
         game.player.gridX++; lastMove = DateTime.now();
       } 
-      // Notice the -1 here: The house is now strictly in the bezel (Zone -1)
-      else if (dx < 0 && game.player.gridX > (game.isHouseBuilt ? -1 : 0)) {
-        game.player.gridX--; lastMove = DateTime.now();
+      else if (dx < 0) {
+        if (game.player.gridX > 0) {
+          game.player.gridX--; lastMove = DateTime.now();
+        } else if (game.player.gridX == 0 && game.isHouseBuilt) {
+          if (game.player.gridY == 2 || game.player.gridY == 3) {
+            game.player.gridX--; lastMove = DateTime.now();
+          }
+        }
       }
     } else {
-      if (dy > 0 && game.player.gridY < GameConfig.rows - 1) {
-        game.player.gridY++; lastMove = DateTime.now();
-      } else if (dy < 0 && game.player.gridY > 0) {
-        game.player.gridY--; lastMove = DateTime.now();
+      if (dy > 0) {
+        if (game.player.gridX == -1 && game.player.gridY >= 3) return;
+        if (game.player.gridY < GameConfig.rows - 1) {
+          game.player.gridY++; lastMove = DateTime.now();
+        }
+      } else if (dy < 0) {
+        if (game.player.gridX == -1 && game.player.gridY <= 2) return;
+        if (game.player.gridY > 0) {
+          game.player.gridY--; lastMove = DateTime.now();
+        }
       }
     }
   }
 
   void _handleJoystickEnd(DragEndDetails details) {
-    // Snap back to center
     joystickOffset.value = Offset.zero; 
   }
 
@@ -79,12 +84,26 @@ class _GameScreenState extends State<GameScreen> {
 
               return Stack(
                 children: [
+                  // --- TOP BEZEL (Info Bar) ---
                   Positioned(
                     top: 5, left: 130, right: 0, 
                     child: Center(
-                      child: _glassBox("Health: ${game.playerHP.toStringAsFixed(1)}/20 | House: ${game.houseHP.toStringAsFixed(1)}/100 | Kills: ${game.kills}")
-                    )
+                      child: Column(
+                        children: [
+                          _glassBox("Health: ${game.playerHP.toStringAsFixed(1)}/20 | House: ${game.houseHP.toStringAsFixed(0)}/100 | Kills: ${game.kills} | ${game.isNight ? '🌙 NIGHT' : '☀️ DAY'}"),
+                          
+                          // --- THE FEAR BAR (Only displays at night) ---
+                          if (game.isNight)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 5),
+                              child: _fearBar(game.fearLevel),
+                            ),
+                        ],
+                      ),
+                    ),
                   ),
+                  
+                  // --- BOTTOM BEZEL (Shop Row) ---
                   Positioned(
                     bottom: 5, left: 130, right: 0,
                     child: Row(
@@ -102,6 +121,7 @@ class _GameScreenState extends State<GameScreen> {
             },
           ),
           
+          // --- LEFT BEZEL (Fire Button) ---
           Positioned(
             bottom: 15, left: 20,
             child: GestureDetector(
@@ -114,7 +134,7 @@ class _GameScreenState extends State<GameScreen> {
             ),
           ),
 
-          // --- THE DYNAMIC JOYSTICK ---
+          // --- RIGHT SIDE (Joystick) ---
           Positioned(
             bottom: 80, right: 30,
             child: GestureDetector(
@@ -155,5 +175,35 @@ class _GameScreenState extends State<GameScreen> {
       ),
     );
     return isButton ? GestureDetector(onTap: onTap, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: box)) : Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: box);
+  }
+
+  // --- THE 6-BLOCK FEAR UI WIDGET ---
+  Widget _fearBar(double fearLevel) {
+    return Container(
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: Colors.black.withOpacity(0.6),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: Colors.red.withOpacity(0.8), width: 1.5),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: List.generate(6, (index) {
+          // Calculate how "full" this specific block should be (0.0 to 1.0)
+          double fillAmount = (fearLevel - index).clamp(0.0, 1.0);
+          
+          return Container(
+            margin: const EdgeInsets.symmetric(horizontal: 2),
+            width: 15,
+            height: 15,
+            decoration: BoxDecoration(
+              // Fills up red smoothly depending on the exact fear fraction
+              color: Colors.red.withOpacity(fillAmount),
+              border: Border.all(color: Colors.white.withOpacity(0.5)),
+            ),
+          );
+        }),
+      ),
+    );
   }
 }
